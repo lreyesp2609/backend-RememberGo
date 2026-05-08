@@ -17,9 +17,6 @@ class Settings(BaseSettings):
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
     
-    # API Configuration
-    api_base_url: str  # ← AGREGA ESTA LÍNEA
-    
     # CORS
     allowed_origins: List[str] = [
         "http://localhost:3000",
