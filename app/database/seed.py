@@ -1,74 +1,105 @@
-from sqlalchemy.orm import Session
-from app.usuarios.models import Rol, Usuario, DatosPersonales
-from passlib.context import CryptContext
 import logging
 
+from sqlalchemy.orm import Session
+
+from app.database.config import settings
+from app.usuarios.models import DatosPersonales, Rol, Usuario
+from app.usuarios.security import hash_password
+
 logger = logging.getLogger(__name__)
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+# ─── Datos semilla ────────────────────────────────────────────────────────────
+_ROLES_INICIALES = [
+    {"nombre": "usuario", "descripcion": "Usuario regular"},
+    {"nombre": "administrador", "descripcion": "Usuario con privilegios de administrador"},
+]
 
-def create_default_roles_and_admin(db: Session):
-    roles_por_crear = [
-        {"nombre": "usuario", "descripcion": "Usuario regular"},
-        {"nombre": "administrador", "descripcion": "Usuario con privilegios de administrador"}
-    ]
 
-    # Crear roles
-    for rol_data in roles_por_crear:
-        rol_existente = db.query(Rol).filter(Rol.nombre == rol_data["nombre"]).first()
-        if rol_existente:
-            logger.info(f"✅ Rol '{rol_data['nombre']}' ya existe")
+# ─── Funciones públicas ───────────────────────────────────────────────────────
+def create_default_roles_and_admin(db: Session) -> None:
+    """
+    Crea los roles base y el usuario administrador inicial si no existen.
+    Es seguro llamar esta función múltiples veces (idempotente).
+    """
+    _create_roles(db)
+    _create_admin_user(db)
+
+
+# ─── Funciones internas ───────────────────────────────────────────────────────
+def _create_roles(db: Session) -> None:
+    """
+    Inserta los roles iniciales que no existan en la base de datos.
+    Usa un único commit para todos los roles nuevos.
+    """
+    roles_nuevos = []
+
+    for rol_data in _ROLES_INICIALES:
+        existe = db.query(Rol).filter(Rol.nombre == rol_data["nombre"]).first()
+
+        if existe:
+            logger.info("Rol '%s' ya existe, se omite.", rol_data["nombre"])
             continue
 
-        nuevo_rol = Rol(nombre=rol_data["nombre"], descripcion=rol_data["descripcion"])
-        try:
-            db.add(nuevo_rol)
-            db.commit()
-            db.refresh(nuevo_rol)
-            logger.info(f"✅ Rol '{rol_data['nombre']}' creado correctamente con id {nuevo_rol.id}")
-        except Exception as e:
-            db.rollback()
-            logger.error(f"❌ Error creando rol '{rol_data['nombre']}': {e}")
-            raise
+        roles_nuevos.append(Rol(nombre=rol_data["nombre"], descripcion=rol_data["descripcion"]))
 
-    # Crear usuario administrador inicial
-    rol_admin = db.query(Rol).filter(Rol.nombre == "administrador").first()
-    if not rol_admin:
-        raise Exception("❌ Rol 'administrador' no encontrado, no se puede crear el admin inicial")
-
-    admin_existente = db.query(Usuario).filter(Usuario.usuario == "lreyesp@gmail.com").first()
-    if admin_existente:
-        logger.info("✅ Usuario administrador ya existe")
+    if not roles_nuevos:
         return
 
-    # 1️⃣ Crear datos personales del admin
-    datos_admin = DatosPersonales(nombre="Admin", apellido="Principal")
     try:
-        db.add(datos_admin)
+        db.add_all(roles_nuevos)
         db.commit()
-        db.refresh(datos_admin)
-    except Exception as e:
+        for rol in roles_nuevos:
+            db.refresh(rol)
+            logger.info("Rol '%s' creado con id %d.", rol.nombre, rol.id)
+    except Exception as exc:
         db.rollback()
-        logger.error(f"❌ Error creando datos personales del admin: {e}")
+        logger.error("Error al crear roles: %s", exc)
         raise
 
-    # 2️⃣ Crear usuario admin usando el ID de DatosPersonales
-    nuevo_admin = Usuario(
-        usuario="lreyesp@gmail.com",
-        contrasenia=hash_password("123456"),
-        rol_id=rol_admin.id,
-        datos_personales_id=datos_admin.id,
-        activo=True
-    )
+
+def _create_admin_user(db: Session) -> None:
+    """
+    Crea el usuario administrador inicial usando las credenciales
+    definidas en las variables de entorno ADMIN_EMAIL y ADMIN_PASSWORD.
+    """
+    rol_admin = db.query(Rol).filter(Rol.nombre == "administrador").first()
+
+    if not rol_admin:
+        raise RuntimeError(
+            "Rol 'administrador' no encontrado. "
+            "Ejecuta _create_roles() antes de _create_admin_user()."
+        )
+
+    admin_existente = db.query(Usuario).filter(
+        Usuario.usuario == settings.admin_email
+    ).first()
+
+    if admin_existente:
+        logger.info("Usuario administrador '%s' ya existe.", settings.admin_email)
+        return
 
     try:
+        datos_admin = DatosPersonales(nombre="Admin", apellido="Principal")
+        db.add(datos_admin)
+        db.flush()  # Obtiene el ID sin commitear aún
+
+        nuevo_admin = Usuario(
+            usuario=settings.admin_email,
+            contrasenia=hash_password(settings.admin_password),
+            rol_id=rol_admin.id,
+            datos_personales_id=datos_admin.id,
+            activo=True,
+        )
         db.add(nuevo_admin)
         db.commit()
         db.refresh(nuevo_admin)
-        logger.info(f"✅ Usuario administrador creado correctamente con id {nuevo_admin.id}")
-    except Exception as e:
+
+        logger.info(
+            "Usuario administrador '%s' creado con id %d.",
+            settings.admin_email,
+            nuevo_admin.id,
+        )
+    except Exception as exc:
         db.rollback()
-        logger.error(f"❌ Error creando usuario administrador: {e}")
+        logger.error("Error al crear usuario administrador: %s", exc)
         raise
