@@ -2,6 +2,12 @@ pipeline {
     agent any
 
     stages {
+        stage('Checkout') {
+            steps {
+                echo 'Clonando / Actualizando el código...'
+                checkout scm
+            }
+        }
         stage('Deploy') {
             steps {
                 withCredentials([file(credentialsId: 'remembergo-env', variable: 'REMEMBERGO_ENV_FILE')]) {

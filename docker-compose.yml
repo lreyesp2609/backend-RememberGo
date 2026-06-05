@@ -11,8 +11,8 @@ services:
     restart: unless-stopped
 
     # ── Puertos ──────────────────────────────────────────────
-    ports:
-      - "8000:8000"
+    # ports:
+    #   - "8000:8000" # No es necesario exponerlo al host; Nginx se comunica internamente en la red de Docker
 
     # ── Variables de entorno ─────────────────────────────────
     env_file:
