@@ -1,14 +1,13 @@
-# docker-compose.yml — RutAI Backend
-# Nota: el campo `version:` fue eliminado (obsoleto desde Compose V2)
+# docker-compose.yml — RememberGo Backend
 
 services:
-  api:
+  remembergo_backend:
     build:
       context: .
       dockerfile: Dockerfile
       target: runtime          # Apunta al stage final del multi-stage build
-    image: rutai-backend:local
-    container_name: rutai_api
+    image: remembergo-backend:local
+    container_name: remembergo_backend
     restart: unless-stopped
 
     # ── Puertos ──────────────────────────────────────────────
@@ -16,9 +15,6 @@ services:
       - "8000:8000"
 
     # ── Variables de entorno ─────────────────────────────────
-    # Las variables sensibles se inyectan desde el archivo .env
-    # que NO se copia en la imagen (está en .dockerignore).
-    # En producción (Render, K8s), inyectar via secrets del orquestador.
     env_file:
       - .env
 
@@ -43,7 +39,7 @@ services:
 
     # ── Red aislada ──────────────────────────────────────────
     networks:
-      - rutai_net
+      - remembergo_net
 
     # ── Logging ──────────────────────────────────────────────
     logging:
@@ -52,6 +48,33 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  nginx_ssl:
+    container_name: nginx_ssl_remembergo
+    image: nginx:latest
+    tty: true
+    ports:
+      - "9615:443"
+    volumes:
+      - nginxfiles:/home/app/nginx
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    command: > 
+      bash -c "
+        mkdir -p /var/www/html /etc/nginx/logs /ssl &&
+        cp -r /home/app/nginx/html/. /var/www/html/ 2>/dev/null || true &&
+        cp -r /home/app/nginx/logs/. /etc/nginx/logs/ 2>/dev/null || true &&
+        cp -r /home/app/nginx/ssl/. /ssl/ 2>/dev/null || true && 
+        nginx -g 'daemon off;'
+      "
+    restart: always
+    depends_on:
+      - remembergo_backend
+    networks:
+      - remembergo_net
+
+volumes:
+  nginxfiles:
+    external: true
+
 networks:
-  rutai_net:
+  remembergo_net:
     driver: bridge
