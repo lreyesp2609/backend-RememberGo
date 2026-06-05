@@ -53,3 +53,9 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
 
 # Forma exec para manejo correcto de señales SIGTERM
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+
+# ============================================================
+# Stage 3: nginx_conf — imagen final de Nginx con su configuración
+# ============================================================
+FROM nginx:latest AS nginx_conf
+COPY nginx.conf /etc/nginx/nginx.conf
